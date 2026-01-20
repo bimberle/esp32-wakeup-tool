@@ -1,63 +1,114 @@
-# ESP Wakeup Keypress
+# ESP32-S3 USB HID Wake Tool mit VL53L0X ToF Sensor
 
-A firmware for ESP32 devices to act as a USB keyboard and wake up the computer
-when a HTTP request is received.
+Weckt Windows 11 PC aus dem Standby wenn Bewegung vor dem ToF-Sensor erkannt wird.
 
-The story behind this is that my computer won't power on for Wake on LAN magic
-packets for some unkown Linux/UEFI reason (all needed settings are enabled for
-the network adapter, it's not a configuration issue). ESP Wakeup Keypress is
-the solution I came up with - I can make a GET request to the ESP device and
-it wakes up the computer for me.
+## Features
 
-## Usage
+- **VL53L0X ToF Sensor** - Laser-Distanzmessung (Pololu-Port mit voller Kalibrierung)
+- **USB HID Keyboard** - Remote Wakeup Signal an Windows PC
+- **Motion Detection** - Delta-basiert (Änderung > 500mm = Trigger)
+- **Cooldown** - 4 Minuten Pause nach Wake
 
-- Run `00-init.sh`, this will download and install ESP-IDF and all its
-  dependencies
-- Run `00-set-target.sh esp32s3` (replace `esp32s3` with your target)
-- Edit the following settings in `sdkconfig`:
+## Hardware
 
-  - CONFIG_ESP_WAKEUP_KEYPRESS_WIFI_SSID
-  - CONFIG_ESP_WAKEUP_KEYPRESS_WIFI_PASSWORD
-  - CONFIG_ESP_WAKEUP_KEYPRESS_HTTPD_PASSWORD
-  - CONFIG_ESP_WAKEUP_KEYPRESS_LED_STRIP_GPIO_NUM
+| Komponente | Pin |
+|------------|-----|
+| VL53L0X SDA | GPIO 14 |
+| VL53L0X SCL | GPIO 21 |
+| VL53L0X XSHUT | GPIO 47 |
+| USB OTG | Nativer USB Port (nicht UART!) |
 
-I'm using a ESP32-S3-DevKitC which has the LED strip at GPIO48, but the latest
-release of the devkit (ESP32-S3-DevKitC-1) has it on GPIO38.
+**Board:** ESP32-S3 WROOM (z.B. Freenove)
 
-- Run `01-build.sh`
-- Create the file `defport-flash` and put `/dev/ttyACM0` into it (or the port
-  where your ESP can be programmed)
-- Put your ESP into bootloader mode by pressing and holding the GPIO0 button
-  while pressing the reset button
-- Run `02-flash.sh`
-- Create the file `defport-monitor` and put `/dev/ttyUSB0` into it (or the port
-  where your ESP serial console is)
-- Run `03-monitor.sh`
-- Press the reset button on your board to exit bootloader mode
+## Schnellstart
 
-Now if you press the button on your board, or open the URL
-`http://esp-wakeup-keypress.localdomain/wakeup?pass=wakeup` an wakeup signal is
-sent to your computer. You may need to change the `pass=wakeup` in the URL
-if you've modified CONFIG_ESP_WAKEUP_KEYPRESS_HTTPD_PASSWORD in the
-`sdkconfig` file.
+```bash
+# 1. ESP-IDF installieren (einmalig)
+./00-init.sh
+
+# 2. Target setzen (einmalig)
+./00-set-target.sh esp32s3
+
+# 3. Bauen
+./01-build.sh
+
+# 4. Flashen (USB-Serial Adapter an TX/RX)
+./02-flash.sh
+
+# 5. Monitor (optional - zum Debuggen)
+./03-monitor.sh
+```
+
+## ⚙️ Parameter anpassen
+
+Die wichtigsten Parameter findest du in `main/tof_sensor.h`:
+
+```c
+// Motion Detection Parameter
+#define MOTION_THRESHOLD_MM     500     // Distanzänderung für Trigger (in mm)
+#define MOTION_COOLDOWN_MS      240000  // Pause nach Wake (240000 = 4 Minuten)
+#define TOF_SAMPLE_INTERVAL_MS  200     // Abtastrate (200 = 5x pro Sekunde)
+#define MAX_DISTANCE_MM         2000    // Alles darüber = "nichts erkannt"
+```
+
+### Parameter-Bedeutung:
+
+| Parameter | Beschreibung | Empfehlung |
+|-----------|--------------|------------|
+| `MOTION_THRESHOLD_MM` | Wie viel mm muss sich ändern für Motion? | 300-500mm |
+| `MOTION_COOLDOWN_MS` | Wie lange warten nach Wake? | 60000-300000 (1-5 Min) |
+| `TOF_SAMPLE_INTERVAL_MS` | Wie oft messen? | 100-500ms |
+
+### Nach Änderung neu flashen:
+
+```bash
+cd esp-idf-wakeup
+
+# Bauen und Flashen in einem Schritt:
+source esp-idf/export.sh
+idf.py build flash -p /dev/cu.usbserial-110
+
+# Oder mit den Skripten:
+./01-build.sh
+./02-flash.sh
+```
+
+**Hinweis:** Der Port `/dev/cu.usbserial-110` kann bei dir anders heißen. Prüfe mit `ls /dev/cu.*`
+
+## Windows Setup
+
+1. ESP32 mit **USB OTG Port** (nicht UART!) an Windows PC anschließen
+2. Windows erkennt "Wakeup Keyboard Device"
+3. **Device Manager** → Keyboards → "Wakeup Keyboard Device"
+4. **Properties** → **Power Management**
+5. ✅ **"Allow this device to wake the computer"** aktivieren
+
+## Funktionsweise
+
+1. Sensor misst kontinuierlich Distanz
+2. Bei großer Änderung (> 500mm) → Motion erkannt
+3. Wenn PC schläft → USB Remote Wakeup Signal
+4. Wenn PC wach → Leertaste (optional)
+5. 4 Minuten Cooldown bis nächster Trigger
 
 ## Troubleshooting
 
-If your computer does not wake up for the virtual keypress, then create this
-shell script at `/lib/systemd/system-sleep/00-esp-wakeup-enable.sh`:
+### Sensor zeigt nur 65535 / 2000mm
+- Kabel prüfen (SDA, SCL, VCC, GND)
+- XSHUT an GPIO47?
+- Nach Kabel-Änderung: Reset-Knopf drücken
 
-```bash
-#!/bin/bash
+### PC wacht nicht auf
+- "Allow device to wake computer" in Windows aktiviert?
+- USB OTG Port verwendet (nicht UART)?
+- Remote Wakeup im Log: `remote_wakeup_en=1`?
 
-# Action script to enable wake after suspend by keyboard or mouse
+### Zu viele False-Positives
+- `MOTION_THRESHOLD_MM` erhöhen (z.B. 600-800)
+- `TOF_SAMPLE_INTERVAL_MS` erhöhen (z.B. 300-500)
 
-if [ "$1" = post ]; then
-    KB="$(lsusb -tvv | grep -A 1 303a:4004 | awk 'NR==2 {print $1}')"
-    echo enabled > ${KB}/power/wakeup
-fi
+## Ursprüngliches Projekt
 
-if [ "$1" = pre ]; then
-    KB="$(lsusb -tvv | grep -A 1 303a:4004 | awk 'NR==2 {print $1}')"
-    echo enabled > ${KB}/power/wakeup
-fi
-```
+Basiert auf [esp-remote-wakeup](https://github.com/original/esp-remote-wakeup) - 
+erweitert um VL53L0X ToF Sensor für automatische Bewegungserkennung.
+
