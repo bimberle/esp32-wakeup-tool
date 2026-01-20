@@ -1,0 +1,15 @@
+menu "ESP Motion Wake Tool"
+
+    config ESP_WAKEUP_KEYPRESS_LED_STRIP_GPIO_NUM
+        int "LED strip GPIO num"
+        default 48
+        help
+            GPIO number of RMT LED strip on the devboard (Freenove ESP32-S3 = 48)
+
+    config ESP_WAKEUP_KEYPRESS_LED_NOTIFY_MODE
+        bool "LED notify mode (test only)"
+        help
+            USB wakeup is not sent when this is enabled,
+            only the LED will be lit on motion detect.
+
+endmenu

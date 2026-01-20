@@ -1,0 +1,18 @@
+# ESP-IDF Framework (als Submodule geholt)
+esp-idf/
+
+# Build Outputs
+build/
+
+# Managed Components (werden per idf.py build geladen)
+managed_components/
+
+# IDE
+.vscode/
+*.code-workspace
+
+# Dependencies Lock (wird regeneriert)
+dependencies.lock
+
+# OS
+.DS_Store
